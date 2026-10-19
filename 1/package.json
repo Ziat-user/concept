@@ -1,0 +1,9 @@
+{
+  "name": "color-search-game",
+  "private": true,
+  "type": "module",
+  "description": "色探しゲーム プロトタイプ（ロジックの単体テスト用。実行時の依存パッケージはありません）",
+  "scripts": {
+    "test": "node --test"
+  }
+}

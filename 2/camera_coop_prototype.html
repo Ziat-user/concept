@@ -1,0 +1,1150 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>カメラ協力アクション プロトタイプ</title>
+<style>
+:root {
+  --bg: #1d2127;
+  --panel: #282d35;
+  --border: #3a414c;
+  --text: #e6e8eb;
+  --muted: #9aa3ad;
+  --accent: #5b9bd5;
+  --radius: 6px;
+  --radius-sm: 4px;
+  --gap: 12px;
+  --gap-sm: 6px;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: var(--gap);
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--gap);
+}
+.screen {
+  width: min(100%, calc((100vh - 190px) * 16 / 9));
+  min-width: 480px;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  background: #000;
+}
+canvas { display: block; width: 100%; height: 100%; }
+.panel {
+  width: min(100%, 960px);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--gap);
+}
+.box {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--gap);
+}
+.box h2 { margin: 0 0 var(--gap-sm); font-size: 13px; color: var(--muted); font-weight: 600; }
+.box label { display: flex; align-items: center; gap: var(--gap-sm); padding: 3px 0; cursor: pointer; }
+.box select {
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 2px 6px; font: inherit;
+}
+.box input[type="checkbox"] { accent-color: var(--accent); }
+.note { color: var(--muted); font-size: 12px; margin-top: var(--gap-sm); }
+.keys { display: grid; grid-template-columns: auto 1fr; gap: 3px var(--gap); }
+kbd {
+  display: inline-block; min-width: 1.6em; padding: 0 5px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg); font-family: inherit; font-size: 12px; text-align: center;
+}
+</style>
+</head>
+<body>
+<div class="screen"><canvas id="game" width="960" height="540"></canvas></div>
+
+<div class="panel">
+  <div class="box" id="settings">
+    <h2>検証用ルール設定</h2>
+    <label><input type="checkbox" id="opt-offscreen-miss"> P1が画面外に1秒以上出たらミス</label>
+    <label><input type="checkbox" id="opt-view-only-switch"> 切替は画面内のブロックだけに効く</label>
+    <label><input type="checkbox" id="opt-enemies-offscreen" checked> 敵は画面外でも動く</label>
+    <label><input type="checkbox" id="opt-spawners" checked> 土管から敵が出続ける</label>
+    <label>失敗方式
+      <select id="opt-fail-mode">
+        <option value="hp" selected>体力制（HP 3）</option>
+        <option value="lives">残機制（残機 3・一撃ミス）</option>
+      </select>
+    </label>
+    <div class="note">設定を変更すると、ステージを最初からやり直します。</div>
+  </div>
+  <div class="box">
+    <h2>操作</h2>
+    <div class="keys">
+      <span>P1</span><span><kbd>A</kbd><kbd>D</kbd> 移動 / <kbd>W</kbd> または <kbd>Space</kbd> ジャンプ</span>
+      <span>P2</span><span><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> カメラ / <kbd>Enter</kbd> または <kbd>/</kbd> 赤青切替</span>
+      <span>共通</span><span><kbd>R</kbd> リスタート / <kbd>P</kbd> または <kbd>Esc</kbd> ポーズ</span>
+    </div>
+    <div class="note">キーボードによっては多数のキーを同時に押すと入力が欠けることがあります。</div>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+// ============================================================
+// 定数・設定
+// ============================================================
+const TILE = 32;
+const VIEW_W = 960;
+const VIEW_H = 540;
+const STEP = 1 / 120;
+const MAX_FRAME = 0.25;
+
+const CONFIG = Object.freeze({
+  gravity: 2000,
+  maxFall: 900,
+  player: { w: 22, h: 30, maxSpeed: 230, accelGround: 2600, accelAir: 1700, friction: 2400 },
+  jump: { velocity: 700, cut: 0.45, coyote: 0.1, buffer: 0.12 },
+  stomp: { bounce: 460, heldBounceRatio: 0.85, tolerance: 8 },
+  hurt: { invuln: 1.5, knockX: 320, knockY: 380, knockTime: 0.25 },
+  respawn: { invuln: 1.0, clearRadiusTiles: 8 },
+  enemy: { w: 26, h: 24, speed: 70, activeMargin: 96 },
+  spawner: { interval: 5, maxAlive: 3 },
+  camera: { speed: 620 },
+  hpMax: 3,
+  livesMax: 3,
+  offscreenGrace: 1.0,
+  fallMargin: 32,
+});
+
+const COLORS = Object.freeze({
+  sky: '#20262f',
+  grid: 'rgba(255,255,255,0.035)',
+  solid: '#5b6371',
+  solidTop: '#7a8494',
+  red: '#d65a54',
+  blue: '#4f80d6',
+  pipe: '#3f8f5a',
+  pipeTop: '#56ad72',
+  player: '#f2c14e',
+  enemy: '#9a6235',
+  text: '#e6e8eb',
+  muted: '#9aa3ad',
+  panel: 'rgba(20,24,30,0.82)',
+  warn: '#e5534b',
+  ok: '#5fb878',
+  gold: '#e8c35a',
+});
+
+const KEYMAP = Object.freeze({
+  p1Left: ['KeyA'],
+  p1Right: ['KeyD'],
+  p1Jump: ['KeyW', 'Space'],
+  p2Left: ['ArrowLeft'],
+  p2Right: ['ArrowRight'],
+  p2Up: ['ArrowUp'],
+  p2Down: ['ArrowDown'],
+  p2Switch: ['Enter', 'NumpadEnter', 'Slash'],
+  restart: ['KeyR'],
+  pause: ['KeyP', 'Escape'],
+});
+const GAME_KEYS = new Set(Object.values(KEYMAP).flat());
+
+const MISS_LABELS = Object.freeze({
+  fall: '落下',
+  crush: 'ブロックに挟まれた',
+  offscreen: '画面外に出すぎた',
+  enemy: '敵に接触',
+});
+
+const settings = {
+  offscreenMiss: false,
+  viewOnlySwitch: false,
+  enemiesOffscreen: true,
+  spawners: true,
+  failMode: 'hp',
+};
+
+// ============================================================
+// 入力
+// ============================================================
+const input = {
+  held: new Set(),
+  pressed: new Set(),
+  isHeld(action) { return KEYMAP[action].some((c) => this.held.has(c)); },
+  wasPressed(action) { return KEYMAP[action].some((c) => this.pressed.has(c)); },
+  clearPressed() { this.pressed.clear(); },
+};
+
+window.addEventListener('keydown', (e) => {
+  if (!GAME_KEYS.has(e.code)) return;
+  const active = document.activeElement;
+  if (active instanceof HTMLElement && active.closest('#settings')) active.blur();
+  e.preventDefault();
+  input.held.add(e.code);
+  if (!e.repeat) input.pressed.add(e.code);
+});
+window.addEventListener('keyup', (e) => {
+  if (GAME_KEYS.has(e.code)) e.preventDefault();
+  input.held.delete(e.code);
+});
+window.addEventListener('blur', () => input.held.clear());
+
+// ============================================================
+// ステージ
+// ============================================================
+// 記号: '.' 空 / '#' 固体 / 'R' 赤ブロック / 'B' 青ブロック
+function buildLevel() {
+  const W = 192;
+  const H = 34;
+  const G = 31; // 地面の最上段
+  const grid = Array.from({ length: H }, () => new Array(W).fill('.'));
+  const fill = (x, y, w, h, ch) => {
+    for (let ty = y; ty < y + h; ty++) {
+      for (let tx = x; tx < x + w; tx++) {
+        if (tx >= 0 && tx < W && ty >= 0 && ty < H) grid[ty][tx] = ch;
+      }
+    }
+  };
+  const level = {
+    W, H, G, grid,
+    start: { tx: 3, ty: G - 1 },
+    enemies: [], spawners: [], checkpoints: [], signs: [], goal: null,
+  };
+
+  fill(0, G, W, H - G, '#');
+  fill(0, 0, 1, H, '#');
+  fill(W - 1, 0, 1, H, '#');
+
+  // スタート地点（P2が先を見に行っている間も敵が来る）
+  level.signs.push({ tx: 6, ty: G - 1, lines: ['P1: A/D 移動  W/Space ジャンプ', 'P2: 矢印 カメラ  Enter 赤青切替'] });
+  fill(11, G - 2, 2, 2, '#');
+  level.spawners.push({ tx: 11, ty: G - 2, tw: 2, th: 2, dir: -1, delay: 6 });
+
+  // A: 青の橋
+  fill(14, G, 10, H - G, '.');
+  fill(14, G, 10, 1, 'B');
+
+  // B: 青い壁と青の橋（切替タイミング）
+  level.signs.push({ tx: 27, ty: G - 1, lines: ['赤にすると青い壁が消える', '渡ったら青に戻して橋を出す'] });
+  fill(32, G - 7, 1, 7, 'B');
+  fill(36, G, 8, H - G, '.');
+  fill(36, G, 8, 1, 'B');
+
+  // C: 敵エリア
+  level.signs.push({ tx: 47, ty: G - 1, lines: ['敵はカメラの外でも動いている（設定で変更可）'] });
+  fill(52, G - 3, 4, 1, '#');
+  fill(60, G - 5, 4, 1, '#');
+  fill(68, G - 3, 4, 1, '#');
+  for (const tx of [58, 66, 74, 80]) level.enemies.push({ tx, ty: G - 1, dir: -1 });
+
+  // D: 縦の塔（カメラを上に動かさないと見えない）
+  level.signs.push({ tx: 81, ty: G - 1, lines: ['上はカメラを動かさないと見えない'] });
+  fill(86, G - 3, 3, 1, '#');
+  fill(91, G - 6, 3, 1, 'R');
+  fill(86, G - 9, 3, 1, 'B');
+  fill(91, G - 12, 3, 1, '#');
+  fill(96, G - 14, 8, 14, '#');
+  level.checkpoints.push({ tx: 98, ty: G - 15 });
+  level.signs.push({ tx: 102, ty: G - 15, lines: ['足場の色に合わせて切替', '灰色の足場で待とう'] });
+
+  // 空中の道（赤青交互）
+  fill(104, G, 32, H - G, '.');
+  const hy = G - 14;
+  fill(104, hy, 6, 1, 'R');
+  fill(110, hy, 2, 1, '#');
+  fill(112, hy, 6, 1, 'B');
+  fill(118, hy, 2, 1, '#');
+  fill(120, hy, 6, 1, 'R');
+  fill(126, hy, 2, 1, '#');
+  fill(128, hy, 6, 1, 'B');
+  fill(134, hy, 2, 1, '#');
+
+  // E: 敵を橋ごと落とす
+  level.checkpoints.push({ tx: 140, ty: G - 1 });
+  level.signs.push({ tx: 144, ty: G - 1, lines: ['橋を消せば敵を落とせる'] });
+  fill(152, G, 8, H - G, '.');
+  fill(152, G, 8, 1, 'R');
+  for (const tx of [164, 169, 174]) level.enemies.push({ tx, ty: G - 1, dir: -1 });
+  fill(178, G - 2, 2, 2, '#');
+  level.spawners.push({ tx: 178, ty: G - 2, tw: 2, th: 2, dir: -1, delay: 3 });
+
+  level.goal = { tx: 186, ty: G - 1 };
+  return level;
+}
+
+const level = buildLevel();
+const LEVEL_W_PX = level.W * TILE;
+const LEVEL_H_PX = level.H * TILE;
+
+// ============================================================
+// ゲーム状態
+// ============================================================
+const game = {
+  state: 'title', // title | play | pause | gameover | clear
+  phase: new Uint8Array(level.W * level.H), // 0: 赤が実体 / 1: 青が実体（タイルごと）
+  globalPhase: 0,
+  player: null,
+  enemies: [],
+  spawners: [],
+  checkpoints: [],
+  respawn: null,
+  camera: { x: 0, y: 0 },
+  hp: 0,
+  lives: 0,
+  time: 0,
+  misses: 0,
+  switches: 0,
+  offTimer: 0,
+  toast: { text: '', timer: 0 },
+  particles: [],
+  endReason: '',
+};
+
+const tileIndex = (tx, ty) => ty * level.W + tx;
+
+function isSolid(tx, ty) {
+  if (tx < 0 || tx >= level.W) return true;
+  if (ty < 0 || ty >= level.H) return false;
+  const ch = level.grid[ty][tx];
+  if (ch === '#') return true;
+  if (ch === 'R') return game.phase[tileIndex(tx, ty)] === 0;
+  if (ch === 'B') return game.phase[tileIndex(tx, ty)] === 1;
+  return false;
+}
+
+function tileRange(b) {
+  return {
+    x0: Math.floor(b.x / TILE),
+    x1: Math.floor((b.x + b.w - 1e-6) / TILE),
+    y0: Math.floor(b.y / TILE),
+    y1: Math.floor((b.y + b.h - 1e-6) / TILE),
+  };
+}
+
+function overlapsSolid(b) {
+  const r = tileRange(b);
+  for (let ty = r.y0; ty <= r.y1; ty++) {
+    for (let tx = r.x0; tx <= r.x1; tx++) {
+      if (isSolid(tx, ty)) return true;
+    }
+  }
+  return false;
+}
+
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function cameraRect(margin = 0) {
+  return { x: game.camera.x - margin, y: game.camera.y - margin, w: VIEW_W + margin * 2, h: VIEW_H + margin * 2 };
+}
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+function createBody(tx, ty, w, h) {
+  return { x: tx * TILE + (TILE - w) / 2, y: (ty + 1) * TILE - h, w, h, vx: 0, vy: 0, onGround: false, hitWall: false, prevBottom: 0 };
+}
+
+function createPlayer(tx, ty) {
+  return Object.assign(createBody(tx, ty, CONFIG.player.w, CONFIG.player.h), {
+    facing: 1, coyote: 0, jumpBuffer: 0, jumpHeld: false, invuln: 0, knockback: 0,
+  });
+}
+
+function createEnemy(x, y, dir, spawner = null) {
+  return { x, y, w: CONFIG.enemy.w, h: CONFIG.enemy.h, vx: 0, vy: 0, dir, onGround: false, hitWall: false, prevBottom: 0, state: 'alive', deadTimer: 0, spawner };
+}
+
+function centerCamera() {
+  const p = game.player;
+  game.camera.x = clamp(p.x + p.w / 2 - VIEW_W / 2, 0, LEVEL_W_PX - VIEW_W);
+  game.camera.y = clamp(p.y + p.h / 2 - VIEW_H / 2, 0, LEVEL_H_PX - VIEW_H);
+}
+
+function resetGame(nextState) {
+  game.state = nextState;
+  game.phase.fill(0);
+  game.globalPhase = 0;
+  game.respawn = { ...level.start };
+  game.player = createPlayer(level.start.tx, level.start.ty);
+  game.enemies = level.enemies.map((e) => {
+    const b = createBody(e.tx, e.ty, CONFIG.enemy.w, CONFIG.enemy.h);
+    return createEnemy(b.x, b.y, e.dir);
+  });
+  game.spawners = level.spawners.map((s) => ({ ...s, timer: s.delay }));
+  game.checkpoints = level.checkpoints.map((c) => ({ ...c, active: false }));
+  game.hp = CONFIG.hpMax;
+  game.lives = CONFIG.livesMax;
+  game.time = 0;
+  game.misses = 0;
+  game.switches = 0;
+  game.offTimer = 0;
+  game.toast = { text: '', timer: 0 };
+  game.particles = [];
+  game.endReason = '';
+  centerCamera();
+}
+
+function showToast(text, duration = 1.6) {
+  game.toast = { text, timer: duration };
+}
+
+function burst(x, y, color, count = 10) {
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = 80 + Math.random() * 200;
+    game.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 120, life: 0.5, color });
+  }
+}
+
+// ============================================================
+// 物理
+// ============================================================
+function resolveX(b) {
+  if (b.vx === 0) return false;
+  const r = tileRange(b);
+  for (let ty = r.y0; ty <= r.y1; ty++) {
+    for (let tx = r.x0; tx <= r.x1; tx++) {
+      if (!isSolid(tx, ty)) continue;
+      b.x = b.vx > 0 ? tx * TILE - b.w : (tx + 1) * TILE;
+      b.vx = 0;
+      return true;
+    }
+  }
+  return false;
+}
+
+function resolveY(b) {
+  if (b.vy === 0) return;
+  const r = tileRange(b);
+  for (let ty = r.y0; ty <= r.y1; ty++) {
+    for (let tx = r.x0; tx <= r.x1; tx++) {
+      if (!isSolid(tx, ty)) continue;
+      if (b.vy > 0) {
+        b.y = ty * TILE - b.h;
+        b.onGround = true;
+      } else {
+        b.y = (ty + 1) * TILE;
+      }
+      b.vy = 0;
+      return;
+    }
+  }
+}
+
+function moveBody(b, dt) {
+  b.prevBottom = b.y + b.h;
+  b.x += b.vx * dt;
+  b.hitWall = resolveX(b);
+  b.y += b.vy * dt;
+  b.onGround = false;
+  resolveY(b);
+}
+
+// ============================================================
+// 更新
+// ============================================================
+function update(dt) {
+  if (input.wasPressed('restart') && game.state !== 'title') {
+    resetGame('play');
+    return;
+  }
+
+  switch (game.state) {
+    case 'title':
+      if (input.wasPressed('p1Jump') || input.wasPressed('p2Switch') || input.wasPressed('restart')) game.state = 'play';
+      return;
+    case 'pause':
+      if (input.wasPressed('pause')) game.state = 'play';
+      return;
+    case 'gameover':
+    case 'clear':
+      updateParticles(dt);
+      return;
+    default:
+      break;
+  }
+
+  if (input.wasPressed('pause')) {
+    game.state = 'pause';
+    return;
+  }
+
+  game.time += dt;
+  updateCamera(dt);
+  if (input.wasPressed('p2Switch')) doSwitch();
+  if (game.state !== 'play') return;
+
+  updatePlayer(dt);
+  updateSpawners(dt);
+  updateEnemies(dt);
+  handlePlayerEnemies();
+  if (game.state !== 'play') return;
+
+  checkCheckpoints();
+  checkGoal();
+  checkFall();
+  if (game.state === 'play') checkOffscreen(dt);
+
+  updateParticles(dt);
+  if (game.toast.timer > 0) game.toast.timer -= dt;
+}
+
+function updateCamera(dt) {
+  let dx = (input.isHeld('p2Right') ? 1 : 0) - (input.isHeld('p2Left') ? 1 : 0);
+  let dy = (input.isHeld('p2Down') ? 1 : 0) - (input.isHeld('p2Up') ? 1 : 0);
+  if (dx !== 0 && dy !== 0) {
+    dx *= Math.SQRT1_2;
+    dy *= Math.SQRT1_2;
+  }
+  const c = game.camera;
+  c.x = clamp(c.x + dx * CONFIG.camera.speed * dt, 0, LEVEL_W_PX - VIEW_W);
+  c.y = clamp(c.y + dy * CONFIG.camera.speed * dt, 0, LEVEL_H_PX - VIEW_H);
+}
+
+function doSwitch() {
+  let x0 = 0, x1 = level.W - 1, y0 = 0, y1 = level.H - 1;
+  if (settings.viewOnlySwitch) {
+    const c = game.camera;
+    x0 = Math.floor(c.x / TILE);
+    x1 = Math.floor((c.x + VIEW_W - 1e-6) / TILE);
+    y0 = Math.floor(c.y / TILE);
+    y1 = Math.floor((c.y + VIEW_H - 1e-6) / TILE);
+  }
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      const ch = level.grid[ty][tx];
+      if (ch === 'R' || ch === 'B') game.phase[tileIndex(tx, ty)] ^= 1;
+    }
+  }
+  game.globalPhase ^= 1;
+  game.switches++;
+
+  for (const e of game.enemies) {
+    if (e.state === 'alive' && overlapsSolid(e)) killEnemy(e);
+  }
+  if (overlapsSolid(game.player)) miss('crush');
+}
+
+function updatePlayer(dt) {
+  const p = game.player;
+  const cfg = CONFIG.player;
+  const dir = (input.isHeld('p1Right') ? 1 : 0) - (input.isHeld('p1Left') ? 1 : 0);
+
+  if (p.invuln > 0) p.invuln -= dt;
+  if (p.knockback > 0) {
+    p.knockback -= dt;
+  } else if (dir !== 0) {
+    p.vx = clamp(p.vx + dir * (p.onGround ? cfg.accelGround : cfg.accelAir) * dt, -cfg.maxSpeed, cfg.maxSpeed);
+    p.facing = dir;
+  } else if (p.onGround) {
+    const f = cfg.friction * dt;
+    p.vx = Math.abs(p.vx) <= f ? 0 : p.vx - Math.sign(p.vx) * f;
+  }
+
+  const j = CONFIG.jump;
+  p.coyote = p.onGround ? j.coyote : Math.max(0, p.coyote - dt);
+  p.jumpBuffer = input.wasPressed('p1Jump') ? j.buffer : Math.max(0, p.jumpBuffer - dt);
+  if (p.jumpBuffer > 0 && p.coyote > 0) {
+    p.vy = -j.velocity;
+    p.jumpBuffer = 0;
+    p.coyote = 0;
+    p.jumpHeld = true;
+  }
+  if (p.jumpHeld && !input.isHeld('p1Jump')) {
+    if (p.vy < 0) p.vy *= j.cut;
+    p.jumpHeld = false;
+  }
+  if (p.vy >= 0) p.jumpHeld = false;
+
+  p.vy = Math.min(p.vy + CONFIG.gravity * dt, CONFIG.maxFall);
+  moveBody(p, dt);
+}
+
+function enemyIsActive(b) {
+  return settings.enemiesOffscreen || rectsOverlap(b, cameraRect(CONFIG.enemy.activeMargin));
+}
+
+function updateSpawners(dt) {
+  if (!settings.spawners) return;
+  for (const s of game.spawners) {
+    const area = { x: s.tx * TILE, y: s.ty * TILE, w: s.tw * TILE, h: s.th * TILE };
+    if (!enemyIsActive(area)) continue;
+    s.timer -= dt;
+    if (s.timer > 0) continue;
+    s.timer = CONFIG.spawner.interval;
+    const alive = game.enemies.filter((e) => e.spawner === s && e.state === 'alive').length;
+    if (alive >= CONFIG.spawner.maxAlive) continue;
+    const x = s.dir < 0 ? s.tx * TILE - CONFIG.enemy.w - 1 : (s.tx + s.tw) * TILE + 1;
+    const y = (s.ty + s.th) * TILE - CONFIG.enemy.h;
+    const e = createEnemy(x, y, s.dir, s);
+    if (!overlapsSolid(e)) game.enemies.push(e);
+  }
+}
+
+function updateEnemies(dt) {
+  for (const e of game.enemies) {
+    if (e.state === 'dead') {
+      e.deadTimer -= dt;
+      continue;
+    }
+    if (e.state !== 'alive' || !enemyIsActive(e)) continue;
+    e.vx = e.dir * CONFIG.enemy.speed;
+    e.vy = Math.min(e.vy + CONFIG.gravity * dt, CONFIG.maxFall);
+    moveBody(e, dt);
+    if (e.hitWall) e.dir *= -1;
+    if (e.y > LEVEL_H_PX + CONFIG.fallMargin) e.state = 'removed';
+  }
+  game.enemies = game.enemies.filter((e) => e.state === 'alive' || (e.state === 'dead' && e.deadTimer > 0));
+}
+
+function killEnemy(e) {
+  e.state = 'dead';
+  e.deadTimer = 0.4;
+  burst(e.x + e.w / 2, e.y + e.h / 2, COLORS.enemy, 8);
+}
+
+function handlePlayerEnemies() {
+  const p = game.player;
+  for (const e of game.enemies) {
+    if (e.state !== 'alive' || !rectsOverlap(p, e)) continue;
+    if (p.vy > 0 && p.prevBottom <= e.y + CONFIG.stomp.tolerance) {
+      killEnemy(e);
+      const held = input.isHeld('p1Jump');
+      p.vy = -(held ? CONFIG.jump.velocity * CONFIG.stomp.heldBounceRatio : CONFIG.stomp.bounce);
+      p.jumpHeld = held;
+      continue;
+    }
+    if (p.invuln > 0) continue;
+    hurtByEnemy(e);
+    return;
+  }
+}
+
+function hurtByEnemy(e) {
+  if (settings.failMode !== 'hp') {
+    miss('enemy');
+    return;
+  }
+  const p = game.player;
+  game.hp--;
+  game.misses++;
+  if (game.hp <= 0) {
+    endGame('gameover', MISS_LABELS.enemy);
+    return;
+  }
+  const away = Math.sign(p.x + p.w / 2 - (e.x + e.w / 2)) || -e.dir;
+  p.vx = away * CONFIG.hurt.knockX;
+  p.vy = -CONFIG.hurt.knockY;
+  p.knockback = CONFIG.hurt.knockTime;
+  p.invuln = CONFIG.hurt.invuln;
+  p.jumpHeld = false;
+  burst(p.x + p.w / 2, p.y + p.h / 2, COLORS.warn, 8);
+  showToast('ダメージ！');
+}
+
+function miss(reason) {
+  const label = MISS_LABELS[reason] ?? reason;
+  game.misses++;
+  if (settings.failMode === 'hp') game.hp--;
+  else game.lives--;
+  const remaining = settings.failMode === 'hp' ? game.hp : game.lives;
+  burst(game.player.x + game.player.w / 2, game.player.y + game.player.h / 2, COLORS.warn, 14);
+  if (remaining <= 0) {
+    endGame('gameover', label);
+    return;
+  }
+  respawnPlayer();
+  showToast(`ミス：${label}`);
+}
+
+function endGame(state, reason) {
+  game.state = state;
+  game.endReason = reason;
+}
+
+function respawnPlayer() {
+  const r = game.respawn;
+  game.player = createPlayer(r.tx, r.ty);
+  game.player.invuln = CONFIG.respawn.invuln;
+  game.offTimer = 0;
+  const cx = (r.tx + 0.5) * TILE;
+  const radius = CONFIG.respawn.clearRadiusTiles * TILE;
+  for (const e of game.enemies) {
+    if (e.state === 'alive' && Math.abs(e.x + e.w / 2 - cx) < radius) e.state = 'removed';
+  }
+  game.enemies = game.enemies.filter((e) => e.state !== 'removed');
+  centerCamera();
+}
+
+function checkCheckpoints() {
+  const p = game.player;
+  for (const c of game.checkpoints) {
+    if (c.active) continue;
+    const area = { x: c.tx * TILE, y: (c.ty - 2) * TILE, w: TILE, h: TILE * 3 };
+    if (!rectsOverlap(p, area)) continue;
+    for (const other of game.checkpoints) other.active = false;
+    c.active = true;
+    game.respawn = { tx: c.tx, ty: c.ty };
+    showToast('チェックポイント');
+  }
+}
+
+function checkGoal() {
+  const g = level.goal;
+  const area = { x: g.tx * TILE, y: (g.ty - 4) * TILE, w: TILE, h: TILE * 5 };
+  if (rectsOverlap(game.player, area)) endGame('clear', '');
+}
+
+function checkFall() {
+  if (game.player.y > LEVEL_H_PX + CONFIG.fallMargin) miss('fall');
+}
+
+function checkOffscreen(dt) {
+  if (rectsOverlap(game.player, cameraRect())) {
+    game.offTimer = 0;
+    return;
+  }
+  game.offTimer += dt;
+  if (settings.offscreenMiss && game.offTimer >= CONFIG.offscreenGrace) miss('offscreen');
+}
+
+function updateParticles(dt) {
+  for (const pt of game.particles) {
+    pt.vy += CONFIG.gravity * 0.5 * dt;
+    pt.x += pt.vx * dt;
+    pt.y += pt.vy * dt;
+    pt.life -= dt;
+  }
+  game.particles = game.particles.filter((pt) => pt.life > 0);
+}
+
+// ============================================================
+// 描画
+// ============================================================
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const FONT = 'system-ui, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif';
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function render() {
+  const cam = game.camera;
+  const ox = Math.round(cam.x);
+  const oy = Math.round(cam.y);
+
+  ctx.fillStyle = COLORS.sky;
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  drawGrid(ox, oy);
+
+  ctx.save();
+  ctx.translate(-ox, -oy);
+  drawTiles();
+  drawSpawners();
+  drawSigns();
+  drawCheckpoints();
+  drawGoal();
+  drawEnemies();
+  drawPlayer();
+  drawParticles();
+  ctx.restore();
+
+  drawOffscreenIndicator();
+  drawHud();
+  drawToast();
+  drawOverlay();
+}
+
+function drawGrid(ox, oy) {
+  ctx.strokeStyle = COLORS.grid;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = -(ox % TILE); x <= VIEW_W; x += TILE) {
+    ctx.moveTo(x + 0.5, 0);
+    ctx.lineTo(x + 0.5, VIEW_H);
+  }
+  for (let y = -(oy % TILE); y <= VIEW_H; y += TILE) {
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(VIEW_W, y + 0.5);
+  }
+  ctx.stroke();
+}
+
+function drawTiles() {
+  const c = game.camera;
+  const x0 = Math.max(0, Math.floor(c.x / TILE));
+  const x1 = Math.min(level.W - 1, Math.floor((c.x + VIEW_W) / TILE));
+  const y0 = Math.max(0, Math.floor(c.y / TILE));
+  const y1 = Math.min(level.H - 1, Math.floor((c.y + VIEW_H) / TILE));
+
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      const ch = level.grid[ty][tx];
+      const px = tx * TILE;
+      const py = ty * TILE;
+      if (ch === '#') {
+        ctx.fillStyle = COLORS.solid;
+        ctx.fillRect(px, py, TILE, TILE);
+        if (!isSolid(tx, ty - 1)) {
+          ctx.fillStyle = COLORS.solidTop;
+          ctx.fillRect(px, py, TILE, 4);
+        }
+      } else if (ch === 'R' || ch === 'B') {
+        const color = ch === 'R' ? COLORS.red : COLORS.blue;
+        if (isSolid(tx, ty)) {
+          ctx.fillStyle = color;
+          ctx.fillRect(px + 1, py + 1, TILE - 2, TILE - 2);
+          ctx.fillStyle = 'rgba(255,255,255,0.18)';
+          ctx.fillRect(px + 1, py + 1, TILE - 2, 4);
+        } else {
+          ctx.save();
+          ctx.globalAlpha = 0.55;
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2;
+          ctx.setLineDash([4, 4]);
+          ctx.strokeRect(px + 3, py + 3, TILE - 6, TILE - 6);
+          ctx.restore();
+        }
+      }
+    }
+  }
+}
+
+function drawSpawners() {
+  for (const s of game.spawners) {
+    const x = s.tx * TILE;
+    const y = s.ty * TILE;
+    ctx.fillStyle = COLORS.pipe;
+    ctx.fillRect(x + 2, y + 6, s.tw * TILE - 4, s.th * TILE - 6);
+    ctx.fillStyle = COLORS.pipeTop;
+    ctx.fillRect(x, y, s.tw * TILE, 10);
+    if (!settings.spawners) {
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.fillRect(x, y, s.tw * TILE, s.th * TILE);
+    }
+  }
+}
+
+function drawSigns() {
+  ctx.font = `13px ${FONT}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const s of level.signs) {
+    const cx = (s.tx + 0.5) * TILE;
+    const bottom = (s.ty + 1) * TILE;
+    ctx.fillStyle = '#7d6a55';
+    ctx.fillRect(cx - 2, bottom - 22, 4, 22);
+
+    const lineH = 18;
+    const width = Math.max(...s.lines.map((l) => ctx.measureText(l).width)) + 16;
+    const height = s.lines.length * lineH + 8;
+    const top = bottom - 22 - height;
+    ctx.fillStyle = COLORS.panel;
+    roundRect(cx - width / 2, top, width, height, 4);
+    ctx.fill();
+    ctx.fillStyle = COLORS.text;
+    s.lines.forEach((l, i) => ctx.fillText(l, cx, top + 4 + lineH * (i + 0.5)));
+  }
+}
+
+function drawCheckpoints() {
+  for (const c of game.checkpoints) {
+    const x = c.tx * TILE + TILE / 2;
+    const bottom = (c.ty + 1) * TILE;
+    ctx.fillStyle = COLORS.muted;
+    ctx.fillRect(x - 2, bottom - 64, 4, 64);
+    ctx.fillStyle = c.active ? COLORS.ok : '#6b7380';
+    ctx.beginPath();
+    ctx.moveTo(x + 2, bottom - 64);
+    ctx.lineTo(x + 24, bottom - 56);
+    ctx.lineTo(x + 2, bottom - 48);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+function drawGoal() {
+  const g = level.goal;
+  const x = g.tx * TILE + TILE / 2;
+  const bottom = (g.ty + 1) * TILE;
+  ctx.fillStyle = COLORS.muted;
+  ctx.fillRect(x - 3, bottom - 150, 6, 150);
+  ctx.fillStyle = COLORS.gold;
+  ctx.fillRect(x + 3, bottom - 150, 40, 26);
+  ctx.fillStyle = '#1d2127';
+  ctx.font = `bold 13px ${FONT}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('GOAL', x + 23, bottom - 137);
+}
+
+function drawEyes(x, y, w, facing, color) {
+  ctx.fillStyle = color;
+  const ex = x + w / 2 + facing * 4;
+  ctx.fillRect(ex - 5, y, 3, 5);
+  ctx.fillRect(ex + 2, y, 3, 5);
+}
+
+function drawEnemies() {
+  for (const e of game.enemies) {
+    if (e.state === 'dead') {
+      ctx.globalAlpha = Math.max(0, e.deadTimer / 0.4);
+      ctx.fillStyle = COLORS.enemy;
+      ctx.fillRect(e.x, e.y + e.h - 8, e.w, 8);
+      ctx.globalAlpha = 1;
+      continue;
+    }
+    ctx.fillStyle = COLORS.enemy;
+    roundRect(e.x, e.y, e.w, e.h, 6);
+    ctx.fill();
+    drawEyes(e.x, e.y + 7, e.w, e.dir, '#f4efe6');
+  }
+}
+
+function drawPlayer() {
+  const p = game.player;
+  if (p.invuln > 0 && Math.floor(p.invuln * 12) % 2 === 0) return;
+  ctx.fillStyle = COLORS.player;
+  roundRect(p.x, p.y, p.w, p.h, 4);
+  ctx.fill();
+  drawEyes(p.x, p.y + 8, p.w, p.facing, '#2a2a2a');
+}
+
+function drawParticles() {
+  for (const pt of game.particles) {
+    ctx.globalAlpha = Math.max(0, pt.life / 0.5);
+    ctx.fillStyle = pt.color;
+    ctx.fillRect(pt.x - 2, pt.y - 2, 4, 4);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawOffscreenIndicator() {
+  if (game.state !== 'play' && game.state !== 'pause') return;
+  const p = game.player;
+  if (rectsOverlap(p, cameraRect())) return;
+
+  const px = p.x + p.w / 2 - game.camera.x;
+  const py = p.y + p.h / 2 - game.camera.y;
+  const m = 28;
+  const ax = clamp(px, m, VIEW_W - m);
+  const ay = clamp(py, m, VIEW_H - m);
+  const angle = Math.atan2(py - ay, px - ax);
+
+  ctx.save();
+  ctx.translate(ax, ay);
+  ctx.rotate(angle);
+  ctx.fillStyle = COLORS.player;
+  ctx.beginPath();
+  ctx.moveTo(16, 0);
+  ctx.lineTo(-8, -11);
+  ctx.lineTo(-8, 11);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  ctx.font = `bold 12px ${FONT}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = COLORS.text;
+  const lx = clamp(ax - Math.cos(angle) * 26, 20, VIEW_W - 20);
+  const ly = clamp(ay - Math.sin(angle) * 26, 14, VIEW_H - 14);
+  ctx.fillText('P1', lx, ly);
+
+  if (settings.offscreenMiss) {
+    const remain = Math.max(0, CONFIG.offscreenGrace - game.offTimer);
+    ctx.strokeStyle = COLORS.warn;
+    ctx.globalAlpha = 0.5 + 0.5 * Math.sin(game.time * 20);
+    ctx.lineWidth = 6;
+    ctx.strokeRect(3, 3, VIEW_W - 6, VIEW_H - 6);
+    ctx.globalAlpha = 1;
+    ctx.font = `bold 20px ${FONT}`;
+    ctx.fillStyle = COLORS.warn;
+    ctx.fillText(`P1が画面外 ${remain.toFixed(1)}`, VIEW_W / 2, 64);
+  }
+}
+
+function formatTime(t) {
+  const m = Math.floor(t / 60);
+  const s = t - m * 60;
+  return `${String(m).padStart(2, '0')}:${s.toFixed(1).padStart(4, '0')}`;
+}
+
+function drawHud() {
+  const lines = [];
+  if (settings.failMode === 'hp') {
+    lines.push({ text: `HP ${'♥'.repeat(Math.max(0, game.hp))}${'♡'.repeat(Math.max(0, CONFIG.hpMax - game.hp))}`, color: COLORS.warn });
+  } else {
+    lines.push({ text: `残機 ${Math.max(0, game.lives)}`, color: COLORS.text });
+  }
+  lines.push({ text: `時間 ${formatTime(game.time)}`, color: COLORS.text });
+  lines.push({ text: `ミス ${game.misses}  切替 ${game.switches}`, color: COLORS.text });
+
+  ctx.font = `14px ${FONT}`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  const lineH = 20;
+  const width = 190;
+  const height = lines.length * lineH + 36;
+  ctx.fillStyle = COLORS.panel;
+  roundRect(10, 10, width, height, 6);
+  ctx.fill();
+  lines.forEach((l, i) => {
+    ctx.fillStyle = l.color;
+    ctx.fillText(l.text, 20, 10 + 12 + lineH * i + lineH / 2 - 4);
+  });
+
+  const sy = 10 + lines.length * lineH + 18;
+  if (settings.viewOnlySwitch) {
+    ctx.fillStyle = COLORS.muted;
+    ctx.fillText('切替：画面内のみ', 20, sy);
+  } else {
+    const red = game.globalPhase === 0;
+    ctx.fillStyle = red ? COLORS.red : COLORS.blue;
+    ctx.fillRect(20, sy - 7, 14, 14);
+    ctx.fillStyle = COLORS.text;
+    ctx.fillText(red ? '赤が実体' : '青が実体', 42, sy);
+  }
+}
+
+function drawToast() {
+  if (game.toast.timer <= 0 || game.state !== 'play') return;
+  ctx.font = `bold 18px ${FONT}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const w = ctx.measureText(game.toast.text).width + 32;
+  ctx.globalAlpha = Math.min(1, game.toast.timer * 3);
+  ctx.fillStyle = COLORS.panel;
+  roundRect(VIEW_W / 2 - w / 2, 96, w, 36, 6);
+  ctx.fill();
+  ctx.fillStyle = COLORS.text;
+  ctx.fillText(game.toast.text, VIEW_W / 2, 114);
+  ctx.globalAlpha = 1;
+}
+
+function drawOverlay() {
+  let title = '';
+  let lines = [];
+  switch (game.state) {
+    case 'title':
+      title = 'カメラ協力アクション（プロトタイプ）';
+      lines = [
+        'P1：A / D で移動、W または Space でジャンプ',
+        'P2：矢印キーでカメラ移動、Enter または / で赤青切替',
+        'カメラはP2が動かさない限り動きません',
+        '',
+        'Space または Enter で開始',
+      ];
+      break;
+    case 'pause':
+      title = 'ポーズ';
+      lines = ['P または Esc で再開', 'R でリスタート'];
+      break;
+    case 'gameover':
+      title = 'ゲームオーバー';
+      lines = [`原因：${game.endReason}`, `時間 ${formatTime(game.time)} / ミス ${game.misses} / 切替 ${game.switches}`, '', 'R でリトライ'];
+      break;
+    case 'clear':
+      title = 'クリア！';
+      lines = [`時間 ${formatTime(game.time)}`, `ミス ${game.misses} / 切替 ${game.switches}`, '', 'R でもう一度'];
+      break;
+    default:
+      return;
+  }
+  ctx.fillStyle = 'rgba(10,12,16,0.72)';
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = COLORS.text;
+  ctx.font = `bold 30px ${FONT}`;
+  const top = VIEW_H / 2 - (lines.length * 26) / 2 - 24;
+  ctx.fillText(title, VIEW_W / 2, top);
+  ctx.font = `16px ${FONT}`;
+  lines.forEach((l, i) => {
+    ctx.fillStyle = i === lines.length - 1 ? COLORS.gold : COLORS.text;
+    ctx.fillText(l, VIEW_W / 2, top + 48 + i * 26);
+  });
+}
+
+// ============================================================
+// 設定UI
+// ============================================================
+const ui = {
+  offscreenMiss: document.getElementById('opt-offscreen-miss'),
+  viewOnlySwitch: document.getElementById('opt-view-only-switch'),
+  enemiesOffscreen: document.getElementById('opt-enemies-offscreen'),
+  spawners: document.getElementById('opt-spawners'),
+  failMode: document.getElementById('opt-fail-mode'),
+};
+
+function readSettings() {
+  settings.offscreenMiss = ui.offscreenMiss.checked;
+  settings.viewOnlySwitch = ui.viewOnlySwitch.checked;
+  settings.enemiesOffscreen = ui.enemiesOffscreen.checked;
+  settings.spawners = ui.spawners.checked;
+  settings.failMode = ui.failMode.value === 'lives' ? 'lives' : 'hp';
+}
+
+for (const el of Object.values(ui)) {
+  el.addEventListener('change', () => {
+    readSettings();
+    resetGame(game.state === 'title' ? 'title' : 'play');
+    if (game.state === 'play') showToast('設定を反映してリスタート');
+    el.blur();
+  });
+}
+
+// ============================================================
+// メインループ
+// ============================================================
+readSettings();
+resetGame('title');
+
+let last = performance.now();
+let acc = 0;
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, MAX_FRAME);
+  last = now;
+  acc += dt;
+  let first = true;
+  while (acc >= STEP) {
+    update(STEP);
+    acc -= STEP;
+    if (first) {
+      input.clearPressed();
+      first = false;
+    }
+  }
+  render();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+if (globalThis.__PROTOTYPE_TEST__) globalThis.__PROTOTYPE_TEST__.expose({ game, level, settings, input, update, render, resetGame });
+})();
+</script>
+</body>
+</html>
