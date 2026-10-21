@@ -121,7 +121,32 @@ export function showSetup(container, assets, initial) {
                             render();
                         })),
                 h("label", { class: "field" }, h("span", { text: "使用するフィールド" }), select),
-                h("p", { class: "hint", text: "素材は assets/images/ と assets/videos/ に置き、ページを再読み込みすると反映されます。" }));
+                h("label", { class: "field" }, h("span", { text: "手元のファイルを追加" }),
+                    h("input", { type: "file", accept: "image/*,video/*", multiple: true, onchange: (e) => {
+                        addLocalFiles(e.target.files);
+                        render();
+                    } })),
+                h("p", { class: "hint", text: assets.local
+                    ? "画像・動画はこの端末の中だけで読み込まれ、どこにも送信されません。ページを再読み込みすると選び直しになります。"
+                    : "素材は assets/images/ と assets/videos/ に置き、ページを再読み込みすると反映されます。" }));
+        };
+
+        // blob: URL は同一オリジン扱いなので、キャンバスからピクセルを読み取れる。
+        const addLocalFiles = (files) => {
+            for (const file of files) {
+                const kind = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : null;
+                if (kind === null) {
+                    continue;
+                }
+                const item = { name: file.name, url: URL.createObjectURL(file) };
+                if (kind === "image") {
+                    assets.images.push(item);
+                    draft.useImages = true;
+                } else {
+                    assets.videos.push(item);
+                    draft.useVideos = true;
+                }
+            }
         };
 
         const visionSelect = (member) => h("select", { "aria-label": "色覚タイプ", onchange: (e) => {
@@ -227,7 +252,9 @@ export function validateSettings(settings, assets) {
     const imageCount = settings.useImages ? assets.images.length : 0;
     const videoCount = settings.useVideos ? assets.videos.length : 0;
     if (imageCount + videoCount === 0) {
-        problems.push("使用できるフィールドがありません。assets/images/ または assets/videos/ に素材を置き、種類を有効にしてください。");
+        problems.push(assets.local
+            ? "使用できるフィールドがありません。「手元のファイルを追加」から画像か動画を選んでください。"
+            : "使用できるフィールドがありません。assets/images/ または assets/videos/ に素材を置き、種類を有効にしてください。");
     }
     const names = settings.mode === "memory"
         ? settings.players.map((p) => p.name.trim())

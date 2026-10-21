@@ -14,6 +14,14 @@
 - `2/`: `camera_coop_prototype.html` をブラウザで開く（設計は [2/DESIGN.md](2/DESIGN.md)）。
 - `3/`: `seiza_puzzle_prototype.html` をブラウザで開く（設計は [3/DESIGN.md](3/DESIGN.md)）。
 
+## Web で遊ぶ
+
+GitHub Pages でも公開しています（[一覧](https://ziat-user.github.io/#prototypes)）。
+
+- [色探しゲーム](https://ziat-user.github.io/concept/color-search/) — 静的配信では素材一覧 API が無いため、設定画面の「手元のファイルを追加」で画像・動画を読み込んで遊びます。
+- [カメラ協力アクション](https://ziat-user.github.io/concept/camera-coop/)
+- [星座パズル](https://ziat-user.github.io/concept/seiza/)
+
 ## ライセンス
 
 [MIT](LICENSE)

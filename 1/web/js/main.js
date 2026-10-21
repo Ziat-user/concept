@@ -13,21 +13,24 @@ const app = document.getElementById("app");
 const statusText = document.getElementById("header-status");
 const abortButton = document.getElementById("abort-button");
 
+/**
+ * server.py の素材一覧 API から素材を取得する。
+ * GitHub Pages などの静的ホスティングでは API が無いため、空の一覧を返し、
+ * 設定画面でプレイヤーの手元のファイルを追加してもらう（local: true）。
+ */
 async function fetchAssets() {
-    let response;
     try {
-        response = await fetch("/api/assets", { cache: "no-store" });
+        const response = await fetch("api/assets", { cache: "no-store" });
+        if (response.ok) {
+            const data = await response.json();
+            if (Array.isArray(data.images) && Array.isArray(data.videos)) {
+                return { ...data, local: false };
+            }
+        }
     } catch {
-        throw new Error("サーバーに接続できません。server.py を起動し、表示された URL から開いてください。");
+        // API が無い環境として扱う。
     }
-    if (!response.ok) {
-        throw new Error(`素材一覧の取得に失敗しました（HTTP ${response.status}）。server.py から起動しているか確認してください。`);
-    }
-    const data = await response.json();
-    if (!Array.isArray(data.images) || !Array.isArray(data.videos)) {
-        throw new Error("素材一覧の形式が不正です。");
-    }
-    return data;
+    return { images: [], videos: [], local: true };
 }
 
 function loadSettings() {
@@ -183,14 +186,7 @@ async function prepareWithFallback(rotation, targetCount, signal, roundLabel) {
 }
 
 async function main() {
-    let assets;
-    try {
-        assets = await fetchAssets();
-    } catch (error) {
-        await showError(app, { title: "起動できません", message: error.message, buttonLabel: "再読み込み" });
-        location.reload();
-        return;
-    }
+    const assets = await fetchAssets();
 
     let settings = loadSettings();
     for (;;) {
