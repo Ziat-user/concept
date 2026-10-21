@@ -1,0 +1,1361 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>星座パズル（プロトタイプ）</title>
+<style>
+:root {
+  --color-bg: #0b0f1a;
+  --color-surface: #121829;
+  --color-surface-2: #1a2236;
+  --color-border: #263049;
+  --color-text: #e6e9f2;
+  --color-text-muted: #8b93a8;
+  --color-accent: #7fb2ff;
+  --color-accent-strong: #5a95f0;
+  --color-success: #ffd36b;
+  --color-danger: #ff6b6b;
+  --color-sky: #070b16;
+  --color-line: #cfe0ff;
+  --color-overlay: rgba(5, 8, 16, 0.86);
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.35);
+
+  --font: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+  --app-width: 360px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font);
+  -webkit-user-select: none;
+  user-select: none;
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: var(--space-2);
+}
+
+#app {
+  position: relative;
+  width: var(--app-width);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.hud {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2) var(--space-3);
+  box-shadow: var(--shadow-sm);
+}
+
+.hud-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.hud-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-label {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.hud-value {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.hud-time .hud-value { font-size: 22px; }
+.hud-time.is-low .hud-value { color: var(--color-danger); }
+
+.timebar {
+  margin-top: var(--space-2);
+  height: 6px;
+  background: var(--color-surface-2);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.timebar-fill {
+  height: 100%;
+  width: 100%;
+  background: var(--color-accent);
+  border-radius: var(--radius-sm);
+}
+
+.hud-time.is-low ~ .timebar .timebar-fill,
+.timebar-fill.is-low { background: var(--color-danger); }
+
+.panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
+  font-size: 12px;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.rule { color: var(--color-accent); }
+
+canvas {
+  display: block;
+  touch-action: none;
+}
+
+.board-wrap {
+  position: relative;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+#board-canvas { cursor: crosshair; }
+
+.toast {
+  position: absolute;
+  top: var(--space-3);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: var(--space-1) var(--space-3);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-success);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.toast.is-visible { opacity: 1; }
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  padding: 0 var(--space-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-overlay);
+  border-radius: var(--radius-lg);
+  z-index: 10;
+}
+
+.overlay.is-visible { display: flex; }
+
+.dialog {
+  width: calc(100% - var(--space-5) * 2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.dialog h1, .dialog h2 {
+  margin: 0;
+  font-size: 22px;
+  text-align: center;
+}
+
+.dialog ul {
+  margin: 0;
+  padding-left: 1.2em;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--color-text-muted);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.field input {
+  font: inherit;
+  font-size: 14px;
+  color: var(--color-text);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.field input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.btn {
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.btn:hover { border-color: var(--color-accent); }
+
+.btn-primary {
+  background: var(--color-accent-strong);
+  border-color: var(--color-accent-strong);
+  color: #fff;
+}
+
+.btn-primary:hover { background: var(--color-accent); }
+
+.result {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-4);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.result dt { color: var(--color-text-muted); }
+.result dd { margin: 0; text-align: right; word-break: break-all; }
+.result .is-highlight { color: var(--color-success); font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="hud">
+    <div class="hud-row">
+      <div class="hud-item"><span class="hud-label">問題</span><span class="hud-value" id="hud-problem">-</span></div>
+      <div class="hud-item"><span class="hud-label">スコア</span><span class="hud-value" id="hud-score">0</span></div>
+      <div class="hud-item hud-time" id="hud-time-wrap"><span class="hud-label">残り</span><span class="hud-value" id="hud-time">0.0</span></div>
+    </div>
+    <div class="timebar"><div class="timebar-fill" id="timebar-fill"></div></div>
+  </header>
+
+  <section class="panel">
+    <div class="panel-head"><span>お題</span><span class="rule" id="hud-rule">-</span></div>
+    <canvas id="preview-canvas"></canvas>
+  </section>
+
+  <section class="board-wrap">
+    <canvas id="board-canvas"></canvas>
+    <div class="toast" id="toast"></div>
+  </section>
+
+  <footer class="footer">
+    <span id="hud-seed">シード: -</span>
+    <span id="hud-best">ベスト: 0</span>
+  </footer>
+
+  <div class="overlay is-visible" id="start-overlay">
+    <div class="dialog">
+      <h1>星座パズル</h1>
+      <ul>
+        <li>お題と同じ形の星を、星空から探してなぞります。</li>
+        <li>星を押したまま、一筆書きで次々となぞってください。</li>
+        <li>離した時点で判定します。間違っていても線が消えるだけで、減点はありません。</li>
+        <li>色付きの星は、お題でも同じ色になっています。</li>
+        <li>正解すると残り時間が増えます。進むほど、拡大縮小や回転が加わります（左右反転はありません）。</li>
+      </ul>
+      <label class="field">
+        シード（空欄ならランダム）
+        <input type="text" id="seed-input" maxlength="32" autocomplete="off" spellcheck="false">
+      </label>
+      <button type="button" class="btn btn-primary" id="start-button">スタート</button>
+    </div>
+  </div>
+
+  <div class="overlay" id="over-overlay">
+    <div class="dialog">
+      <h2>タイムアップ</h2>
+      <dl class="result">
+        <dt>スコア</dt><dd class="is-highlight" id="result-score">0</dd>
+        <dt>ベスト</dt><dd id="result-best">0</dd>
+        <dt>シード</dt><dd id="result-seed">-</dd>
+      </dl>
+      <button type="button" class="btn btn-primary" id="retry-same-button">同じシードで再挑戦</button>
+      <button type="button" class="btn" id="retry-new-button">新しいシードで開始</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ==== CORE BEGIN ====
+// DOM に依存しないゲームロジック（盤面生成・一意性検証・判定）
+
+const CONFIG = Object.freeze({
+  // 盤面とお題の論理座標系（縦長 9:16 前後）。両キャンバスは同じ縮尺で描画する。
+  board: Object.freeze({ width: 360, height: 540, margin: 22 }),
+  preview: Object.freeze({ width: 360, height: 190 }),
+  star: Object.freeze({
+    minDistance: 24,   // 星同士の最小距離
+    radius: 3.2,       // 描画半径
+    hitRadius: 18,     // 最初の星を押すときの当たり判定
+    snapRadius: 12,    // なぞっている最中に星へ吸い付く距離
+  }),
+  shape: Object.freeze({
+    box: 150,                   // お題の基準サイズ（拡大率 1 のときの外枠）
+    minExtentRatio: 0.6,        // 外枠に対して最低限必要な広がり
+    minPointDistance: 40,       // お題の点同士の最小距離（最小拡大率でも星の最小距離を下回らない値）
+    minVertexEdgeClearance: 28, // お題の辺と、その辺に属さない点との最小距離
+    minEdgeAngleDeg: 25,        // 同じ点から出る 2 辺の最小角度
+    minCrossAngleDeg: 25,       // 交差する 2 辺の最小角度
+  }),
+  edgeClearance: 16, // 正解の辺と、他の星との最小距離（A→C と A→B→C の混同を防ぐ）
+  match: Object.freeze({
+    tolerance: 9,          // これより近いずれは「同じ形」とみなす
+    scaleMargin: 1.15,     // 一意性検証では許可範囲より広く拡大率を見る
+    rotationMarginDeg: 12, // 同じく回転角
+  }),
+  // 白を含めて 7 色
+  colors: Object.freeze([
+    Object.freeze({ id: 'white', hex: '#f2f4f8' }),
+    Object.freeze({ id: 'red', hex: '#ff5b4a' }),
+    Object.freeze({ id: 'orange', hex: '#ffa23a' }),
+    Object.freeze({ id: 'yellow', hex: '#ffe14d' }),
+    Object.freeze({ id: 'green', hex: '#5fd36a' }),
+    Object.freeze({ id: 'blue', hex: '#4fa3ff' }),
+    Object.freeze({ id: 'purple', hex: '#c27dff' }),
+  ]),
+  randomColorChance: 0.05, // 一般の星が色付きになる確率
+  maxTargetColored: 2,     // お題の中で色付きにしてよい点の上限
+  time: Object.freeze({
+    initial: 30,
+    max: 60,
+    gainStart: 10,   // 1 問目の加算秒数
+    gainDecay: 0.15, // 1 問ごとの減少
+    gainMin: 5,
+  }),
+});
+
+const WHITE = 'white';
+const NON_WHITE_COLORS = CONFIG.colors.filter((c) => c.id !== WHITE).map((c) => c.id);
+
+// 難易度の段階表。from は問題番号（1 始まり）。
+const STAGES = Object.freeze([
+  { from: 1,  label: '移動のみ',                     points: [3, 3], extraEdges: [0, 0], stars: [10, 14], scale: [1, 1],       rotationDeg: 0,   targetColorChance: 0 },
+  { from: 4,  label: '移動のみ',                     points: [4, 4], extraEdges: [0, 0], stars: [16, 22], scale: [1, 1],       rotationDeg: 0,   targetColorChance: 0 },
+  { from: 7,  label: '移動・拡大縮小',               points: [4, 5], extraEdges: [0, 1], stars: [22, 30], scale: [0.8, 1.25],  rotationDeg: 0,   targetColorChance: 0 },
+  { from: 11, label: '移動・拡大縮小・回転 ±30°',    points: [4, 5], extraEdges: [0, 1], stars: [28, 36], scale: [0.75, 1.3],  rotationDeg: 30,  targetColorChance: 0.1 },
+  { from: 16, label: '移動・拡大縮小・回転 ±90°',    points: [5, 6], extraEdges: [1, 2], stars: [34, 44], scale: [0.7, 1.4],   rotationDeg: 90,  targetColorChance: 0.2 },
+  { from: 21, label: '移動・拡大縮小・回転 自由',    points: [5, 7], extraEdges: [1, 2], stars: [42, 54], scale: [0.6, 1.5],   rotationDeg: 180, targetColorChance: 0.3 },
+  { from: 31, label: '移動・拡大縮小・回転 自由',    points: [6, 7], extraEdges: [1, 3], stars: [52, 66], scale: [0.6, 1.5],   rotationDeg: 180, targetColorChance: 0.3 },
+].map(Object.freeze));
+
+function stageFor(problemNumber) {
+  let current = STAGES[0];
+  for (const stage of STAGES) {
+    if (problemNumber >= stage.from) current = stage;
+  }
+  return current;
+}
+
+function timeGainFor(problemNumber) {
+  const t = CONFIG.time;
+  const raw = t.gainStart - t.gainDecay * (problemNumber - 1);
+  return Math.max(t.gainMin, Math.round(raw * 2) / 2);
+}
+
+// ---- 乱数（シード付き） ----
+
+function hashString(str) {
+  // xmur3
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++) {
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  h = Math.imul(h ^ (h >>> 16), 2246822507);
+  h = Math.imul(h ^ (h >>> 13), 3266489909);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+class Random {
+  constructor(seedText) {
+    this.state = hashString(seedText);
+  }
+
+  // mulberry32
+  float() {
+    this.state = (this.state + 0x6d2b79f5) | 0;
+    let t = this.state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  range(min, max) {
+    return min + (max - min) * this.float();
+  }
+
+  int(min, max) {
+    return min + Math.floor(this.float() * (max - min + 1));
+  }
+
+  chance(p) {
+    return this.float() < p;
+  }
+
+  pick(items) {
+    return items[Math.floor(this.float() * items.length)];
+  }
+
+  shuffle(items) {
+    const result = items.slice();
+    for (let i = result.length - 1; i > 0; i--) {
+      const j = Math.floor(this.float() * (i + 1));
+      [result[i], result[j]] = [result[j], result[i]];
+    }
+    return result;
+  }
+}
+
+// ---- 幾何 ----
+
+function dist2(ax, ay, bx, by) {
+  const dx = ax - bx;
+  const dy = ay - by;
+  return dx * dx + dy * dy;
+}
+
+function distPointSegment(px, py, ax, ay, bx, by) {
+  const vx = bx - ax;
+  const vy = by - ay;
+  const len2 = vx * vx + vy * vy;
+  let t = len2 > 0 ? ((px - ax) * vx + (py - ay) * vy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.sqrt(dist2(px, py, ax + vx * t, ay + vy * t));
+}
+
+function projectionT(px, py, ax, ay, bx, by) {
+  const vx = bx - ax;
+  const vy = by - ay;
+  const len2 = vx * vx + vy * vy;
+  return len2 > 0 ? ((px - ax) * vx + (py - ay) * vy) / len2 : 0;
+}
+
+function normalizeAngle(a) {
+  while (a > Math.PI) a -= 2 * Math.PI;
+  while (a < -Math.PI) a += 2 * Math.PI;
+  return a;
+}
+
+// 2 直線の間の角度（0〜90°、ラジアン）
+function lineAngle(ax, ay, bx, by, cx, cy, dx, dy) {
+  const a1 = Math.atan2(by - ay, bx - ax);
+  const a2 = Math.atan2(dy - cy, dx - cx);
+  let d = Math.abs(normalizeAngle(a1 - a2));
+  if (d > Math.PI / 2) d = Math.PI - d;
+  return d;
+}
+
+function segmentsProperlyIntersect(a, b, c, d) {
+  const cross = (o, p, q) => (p.x - o.x) * (q.y - o.y) - (p.y - o.y) * (q.x - o.x);
+  const d1 = cross(c, d, a);
+  const d2 = cross(c, d, b);
+  const d3 = cross(a, b, c);
+  const d4 = cross(a, b, d);
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+}
+
+function edgeKey(a, b) {
+  return a < b ? `${a}-${b}` : `${b}-${a}`;
+}
+
+// ---- お題の形の生成 ----
+
+function samplePoints(rng, count) {
+  const half = CONFIG.shape.box / 2;
+  const minD2 = CONFIG.shape.minPointDistance ** 2;
+  const points = [];
+  let attempts = 0;
+  while (points.length < count && attempts++ < 400) {
+    const x = rng.range(-half, half);
+    const y = rng.range(-half, half);
+    if (points.every((p) => dist2(p.x, p.y, x, y) >= minD2)) {
+      points.push({ x, y });
+    }
+  }
+  return points.length === count ? points : null;
+}
+
+// 一筆書きの順路を直接作る。全点を通る道を作り、その後に終点から未接続の点へ伸ばす。
+// 順路そのものがオイラー路になるため、一筆書きできることが保証される。
+function buildTrail(rng, count, extraEdges) {
+  const trail = rng.shuffle([...Array(count).keys()]);
+  const edges = new Set();
+  for (let i = 1; i < trail.length; i++) edges.add(edgeKey(trail[i - 1], trail[i]));
+  for (let e = 0; e < extraEdges; e++) {
+    const end = trail[trail.length - 1];
+    const candidates = [];
+    for (let v = 0; v < count; v++) {
+      if (v !== end && !edges.has(edgeKey(end, v))) candidates.push(v);
+    }
+    if (candidates.length === 0) break;
+    const next = rng.pick(candidates);
+    edges.add(edgeKey(end, next));
+    trail.push(next);
+  }
+  return trail;
+}
+
+function trailEdges(trail) {
+  const edges = [];
+  for (let i = 1; i < trail.length; i++) edges.push([trail[i - 1], trail[i]]);
+  return edges;
+}
+
+function isShapeReadable(points, edges) {
+  const cfg = CONFIG.shape;
+  const minEdgeAngle = (cfg.minEdgeAngleDeg * Math.PI) / 180;
+  const minCrossAngle = (cfg.minCrossAngleDeg * Math.PI) / 180;
+
+  // 辺の近くに無関係な点がない
+  for (const [u, v] of edges) {
+    const a = points[u];
+    const b = points[v];
+    for (let w = 0; w < points.length; w++) {
+      if (w === u || w === v) continue;
+      if (distPointSegment(points[w].x, points[w].y, a.x, a.y, b.x, b.y) < cfg.minVertexEdgeClearance) {
+        return false;
+      }
+    }
+  }
+
+  for (let i = 0; i < edges.length; i++) {
+    for (let j = i + 1; j < edges.length; j++) {
+      const [a, b] = edges[i];
+      const [c, d] = edges[j];
+      const shared = [a, b].filter((x) => x === c || x === d);
+      if (shared.length === 1) {
+        // 同じ点から出る 2 辺が重なって見えない
+        const s = shared[0];
+        const p = a === s ? b : a;
+        const q = c === s ? d : c;
+        const ang = Math.abs(normalizeAngle(
+          Math.atan2(points[p].y - points[s].y, points[p].x - points[s].x) -
+          Math.atan2(points[q].y - points[s].y, points[q].x - points[s].x)
+        ));
+        if (ang < minEdgeAngle) return false;
+      } else if (shared.length === 0) {
+        // 交差は許可するが、浅い角度の交差は見分けにくいので除外する
+        if (segmentsProperlyIntersect(points[a], points[b], points[c], points[d])) {
+          const ang = lineAngle(
+            points[a].x, points[a].y, points[b].x, points[b].y,
+            points[c].x, points[c].y, points[d].x, points[d].y
+          );
+          if (ang < minCrossAngle) return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
+function generateShape(rng, pointCount, extraEdges) {
+  const minExtent = CONFIG.shape.box * CONFIG.shape.minExtentRatio;
+  for (let attempt = 0; attempt < 300; attempt++) {
+    const raw = samplePoints(rng, pointCount);
+    if (!raw) continue;
+    const trail = buildTrail(rng, pointCount, extraEdges);
+    const edges = trailEdges(trail);
+    if (!isShapeReadable(raw, edges)) continue;
+
+    const xs = raw.map((p) => p.x);
+    const ys = raw.map((p) => p.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    if (Math.max(maxX - minX, maxY - minY) < minExtent) continue;
+
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    return {
+      points: raw.map((p) => ({ x: p.x - cx, y: p.y - cy, color: WHITE })),
+      edges,
+      trail,
+    };
+  }
+  return null;
+}
+
+// ---- 盤面の生成 ----
+
+function placeShape(rng, shape, stage) {
+  const { width, height, margin } = CONFIG.board;
+  const maxRot = (stage.rotationDeg * Math.PI) / 180;
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const scale = stage.scale[0] === stage.scale[1]
+      ? stage.scale[0]
+      : Math.exp(rng.range(Math.log(stage.scale[0]), Math.log(stage.scale[1])));
+    const rotation = maxRot > 0 ? rng.range(-maxRot, maxRot) : 0;
+    const c = Math.cos(rotation) * scale;
+    const s = Math.sin(rotation) * scale;
+    const local = shape.points.map((p) => ({ x: c * p.x - s * p.y, y: s * p.x + c * p.y }));
+    const xs = local.map((p) => p.x);
+    const ys = local.map((p) => p.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    if (maxX - minX > width - 2 * margin || maxY - minY > height - 2 * margin) continue;
+    const ox = rng.range(margin - minX, width - margin - maxX);
+    const oy = rng.range(margin - minY, height - margin - maxY);
+    return { positions: local.map((p) => ({ x: p.x + ox, y: p.y + oy })), scale, rotation };
+  }
+  return null;
+}
+
+function buildBoard(rng, shape, stage) {
+  const placed = placeShape(rng, shape, stage);
+  if (!placed) return null;
+  const { width, height, margin } = CONFIG.board;
+  const minD2 = CONFIG.star.minDistance ** 2;
+  const answerPositions = placed.positions;
+
+  const stars = answerPositions.map((p, v) => ({ x: p.x, y: p.y, color: shape.points[v].color }));
+  const segments = shape.edges.map(([u, v]) => [answerPositions[u], answerPositions[v]]);
+  const targetCount = rng.int(stage.stars[0], stage.stars[1]);
+  const maxAttempts = targetCount * 80;
+
+  let attempts = 0;
+  while (stars.length < targetCount && attempts++ < maxAttempts) {
+    const x = rng.range(margin, width - margin);
+    const y = rng.range(margin, height - margin);
+    if (stars.some((s) => dist2(s.x, s.y, x, y) < minD2)) continue;
+    if (segments.some(([a, b]) => distPointSegment(x, y, a.x, a.y, b.x, b.y) < CONFIG.edgeClearance)) continue;
+    const color = rng.chance(CONFIG.randomColorChance) ? rng.pick(NON_WHITE_COLORS) : WHITE;
+    stars.push({ x, y, color });
+  }
+
+  // 星の並び順から正解が推測されないように並べ替える
+  const order = rng.shuffle([...stars.keys()]);
+  const shuffled = order.map((i) => stars[i]);
+  const indexOf = new Map(order.map((original, idx) => [original, idx]));
+  const answerMap = shape.points.map((_, v) => indexOf.get(v));
+  return { stars: shuffled, answerMap, scale: placed.scale, rotation: placed.rotation };
+}
+
+// ---- 一意性の検証 ----
+
+function farthestPair(points) {
+  let best = [0, 1];
+  let bestD = -1;
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      const d = dist2(points[i].x, points[i].y, points[j].x, points[j].y);
+      if (d > bestD) {
+        bestD = d;
+        best = [i, j];
+      }
+    }
+  }
+  return best;
+}
+
+function matchConstraints(stage) {
+  const m = CONFIG.match;
+  return {
+    tolerance: m.tolerance,
+    minScale: stage.scale[0] / m.scaleMargin,
+    maxScale: stage.scale[1] * m.scaleMargin,
+    maxRotation: Math.min(Math.PI, ((stage.rotationDeg + m.rotationMarginDeg) * Math.PI) / 180),
+  };
+}
+
+// お題の点 → 星 の対応をすべて列挙する（移動・拡大縮小・回転。反転は含まない）。
+// 2 点の対応で相似変換が一意に決まるため、最も離れた 2 点をアンカーにして全ペアを試す。
+function findMatches(points, stars, constraints) {
+  const k = points.length;
+  const [a, b] = farthestPair(points);
+  const pa = points[a];
+  const pb = points[b];
+  const dLen = Math.sqrt(dist2(pa.x, pa.y, pb.x, pb.y));
+  const dAng = Math.atan2(pb.y - pa.y, pb.x - pa.x);
+  const tol2 = constraints.tolerance ** 2;
+  const results = [];
+
+  for (let i = 0; i < stars.length; i++) {
+    const si = stars[i];
+    if (si.color !== pa.color) continue;
+    for (let j = 0; j < stars.length; j++) {
+      if (j === i) continue;
+      const sj = stars[j];
+      if (sj.color !== pb.color) continue;
+      const vx = sj.x - si.x;
+      const vy = sj.y - si.y;
+      const scale = Math.sqrt(vx * vx + vy * vy) / dLen;
+      if (scale < constraints.minScale || scale > constraints.maxScale) continue;
+      const rot = normalizeAngle(Math.atan2(vy, vx) - dAng);
+      if (Math.abs(rot) > constraints.maxRotation) continue;
+
+      const c = Math.cos(rot) * scale;
+      const s = Math.sin(rot) * scale;
+      const mapping = new Array(k).fill(-1);
+      mapping[a] = i;
+      mapping[b] = j;
+      let ok = true;
+      for (let v = 0; v < k && ok; v++) {
+        if (v === a || v === b) continue;
+        const px = points[v].x - pa.x;
+        const py = points[v].y - pa.y;
+        const tx = si.x + c * px - s * py;
+        const ty = si.y + s * px + c * py;
+        let found = -1;
+        for (let m = 0; m < stars.length; m++) {
+          const st = stars[m];
+          if (st.color !== points[v].color) continue;
+          if (dist2(st.x, st.y, tx, ty) <= tol2 && !mapping.includes(m)) {
+            found = m;
+            break;
+          }
+        }
+        if (found < 0) ok = false;
+        else mapping[v] = found;
+      }
+      if (ok) results.push(mapping);
+    }
+  }
+  return results;
+}
+
+function mappedEdgeSignature(edges, mapping) {
+  return edges.map(([u, v]) => edgeKey(mapping[u], mapping[v])).sort().join('|');
+}
+
+function pickColorExcept(rng, excluded) {
+  const candidates = NON_WHITE_COLORS.filter((c) => !excluded.includes(c));
+  return rng.pick(candidates);
+}
+
+// 偽の一致を 1 つ崩す。成功したら true。
+function breakFalseMatch(rng, shape, board, mapping) {
+  const answerStarToVertex = new Map(board.answerMap.map((starIdx, v) => [starIdx, v]));
+  const outsiders = [];
+  for (let u = 0; u < mapping.length; u++) {
+    if (!answerStarToVertex.has(mapping[u])) outsiders.push(u);
+  }
+
+  if (outsiders.length > 0) {
+    // 正解と無関係な星の色を変える（お題側は変えない）
+    const u = rng.pick(outsiders);
+    const star = board.stars[mapping[u]];
+    star.color = pickColorExcept(rng, [star.color, shape.points[u].color]);
+    return true;
+  }
+
+  // 偽の一致がすべて正解の星の上にある（形の対称性など）：正解の星とお題の点を同じ色にする
+  const differing = [];
+  for (let u = 0; u < mapping.length; u++) {
+    if (mapping[u] !== board.answerMap[u]) differing.push(u);
+  }
+  if (differing.length === 0) return false;
+  const u = rng.pick(differing);
+  const starIdx = mapping[u];
+  const v = answerStarToVertex.get(starIdx);
+  const colored = shape.points.filter((p) => p.color !== WHITE).length;
+  if (shape.points[v].color === WHITE && colored >= CONFIG.maxTargetColored) return false;
+  const color = pickColorExcept(rng, [shape.points[u].color, shape.points[v].color]);
+  shape.points[v].color = color;
+  board.stars[starIdx].color = color;
+  return true;
+}
+
+function ensureUnique(rng, shape, board, stage) {
+  const constraints = matchConstraints(stage);
+  const answerSig = mappedEdgeSignature(shape.edges, board.answerMap);
+  for (let iter = 0; iter < 40; iter++) {
+    const matches = findMatches(shape.points, board.stars, constraints);
+    const answerFound = matches.some((m) => mappedEdgeSignature(shape.edges, m) === answerSig);
+    if (!answerFound) return false; // 想定外。盤面を作り直す
+    const falses = matches.filter((m) => mappedEdgeSignature(shape.edges, m) !== answerSig);
+    if (falses.length === 0) return true;
+    if (!breakFalseMatch(rng, shape, board, rng.pick(falses))) return false;
+  }
+  return false;
+}
+
+// ---- 問題の生成 ----
+
+function createPuzzle(seed, problemNumber) {
+  // 問題ごとに独立した乱数列。生成のやり直しもすべてこの乱数列から行う。
+  const rng = new Random(`${seed}#${problemNumber}`);
+  const stage = stageFor(problemNumber);
+
+  for (let attempt = 0; attempt < 80; attempt++) {
+    const pointCount = rng.int(stage.points[0], stage.points[1]);
+    const extraEdges = rng.int(stage.extraEdges[0], stage.extraEdges[1]);
+    const shape = generateShape(rng, pointCount, extraEdges);
+    if (!shape) continue;
+
+    if (rng.chance(stage.targetColorChance)) {
+      rng.pick(shape.points).color = rng.pick(NON_WHITE_COLORS);
+    }
+
+    const board = buildBoard(rng, shape, stage);
+    if (!board) continue;
+    if (!ensureUnique(rng, shape, board, stage)) continue;
+
+    const answerEdgeKeys = new Set(shape.edges.map(([u, v]) => edgeKey(board.answerMap[u], board.answerMap[v])));
+    return {
+      seed,
+      problemNumber,
+      stage,
+      shape,
+      stars: board.stars,
+      answerMap: board.answerMap,
+      answerEdgeKeys,
+      answerTrail: shape.trail.map((v) => board.answerMap[v]),
+      timeGain: timeGainFor(problemNumber),
+    };
+  }
+  throw new Error(`問題を生成できませんでした（seed=${seed}, problem=${problemNumber}）`);
+}
+
+// ---- 判定 ----
+// path は星のインデックス列。連続する 2 つが 1 本の辺。
+// 同じ辺を 2 度通らず、辺の集合が正解と一致すれば正解（なぞる順番・向きは問わない）。
+function judgePath(puzzle, path) {
+  if (path.length < 2) return 'empty';
+  const drawn = new Set();
+  for (let i = 1; i < path.length; i++) {
+    const key = edgeKey(path[i - 1], path[i]);
+    if (drawn.has(key)) return 'wrong';
+    drawn.add(key);
+  }
+  if (drawn.size !== puzzle.answerEdgeKeys.size) return 'wrong';
+  for (const key of drawn) {
+    if (!puzzle.answerEdgeKeys.has(key)) return 'wrong';
+  }
+  return 'correct';
+}
+
+// 線分 a→b の近くにある星を、a に近い順に返す
+function starsAlongSegment(stars, a, b, radius) {
+  const hits = [];
+  for (let i = 0; i < stars.length; i++) {
+    const s = stars[i];
+    if (distPointSegment(s.x, s.y, a.x, a.y, b.x, b.y) <= radius) {
+      hits.push({ index: i, t: projectionT(s.x, s.y, a.x, a.y, b.x, b.y) });
+    }
+  }
+  hits.sort((p, q) => p.t - q.t);
+  return hits.map((h) => h.index);
+}
+
+function nearestStar(stars, p, radius) {
+  let best = -1;
+  let bestD2 = radius * radius;
+  for (let i = 0; i < stars.length; i++) {
+    const d = dist2(stars[i].x, stars[i].y, p.x, p.y);
+    if (d <= bestD2) {
+      bestD2 = d;
+      best = i;
+    }
+  }
+  return best;
+}
+// ==== CORE END ====
+
+// ==== UI ====
+
+const STORAGE_KEY_BEST = 'seiza-puzzle.best';
+const TRANSITION_SECONDS = 0.7;
+const WRONG_FLASH_SECONDS = 0.4;
+const TOAST_MS = 900;
+
+const dom = {
+  app: document.getElementById('app'),
+  preview: document.getElementById('preview-canvas'),
+  board: document.getElementById('board-canvas'),
+  problem: document.getElementById('hud-problem'),
+  score: document.getElementById('hud-score'),
+  time: document.getElementById('hud-time'),
+  timeWrap: document.getElementById('hud-time-wrap'),
+  timebar: document.getElementById('timebar-fill'),
+  rule: document.getElementById('hud-rule'),
+  seed: document.getElementById('hud-seed'),
+  best: document.getElementById('hud-best'),
+  toast: document.getElementById('toast'),
+  startOverlay: document.getElementById('start-overlay'),
+  overOverlay: document.getElementById('over-overlay'),
+  seedInput: document.getElementById('seed-input'),
+  startButton: document.getElementById('start-button'),
+  retrySame: document.getElementById('retry-same-button'),
+  retryNew: document.getElementById('retry-new-button'),
+  resultScore: document.getElementById('result-score'),
+  resultBest: document.getElementById('result-best'),
+  resultSeed: document.getElementById('result-seed'),
+};
+
+const previewCtx = dom.preview.getContext('2d');
+const boardCtx = dom.board.getContext('2d');
+
+const params = new URLSearchParams(location.search);
+const debugAllowed = params.get('debug') === '1';
+
+const css = getComputedStyle(document.documentElement);
+const theme = {
+  sky: css.getPropertyValue('--color-sky').trim(),
+  surface: css.getPropertyValue('--color-surface').trim(),
+  line: css.getPropertyValue('--color-line').trim(),
+  success: css.getPropertyValue('--color-success').trim(),
+  danger: css.getPropertyValue('--color-danger').trim(),
+  accent: css.getPropertyValue('--color-accent').trim(),
+};
+const colorHex = new Map(CONFIG.colors.map((c) => [c.id, c.hex]));
+
+const state = {
+  phase: 'idle', // idle | playing | transition | over
+  seed: '',
+  problemNumber: 0,
+  score: 0,
+  timeLeft: 0,
+  puzzle: null,
+  drag: null,          // { pointerId, path: number[], cursor: {x,y}, last: {x,y} }
+  hover: -1,
+  feedback: null,      // { kind: 'wrong' | 'solved', path: number[], remaining, duration }
+  transitionLeft: 0,
+  showAnswer: false,
+  best: loadBest(),
+  scale: 1,            // CSS ピクセル / 論理単位
+};
+
+let toastTimer = 0;
+
+function loadBest() {
+  try {
+    const v = Number.parseInt(localStorage.getItem(STORAGE_KEY_BEST) ?? '0', 10);
+    return Number.isFinite(v) && v > 0 ? v : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function saveBest(value) {
+  try {
+    localStorage.setItem(STORAGE_KEY_BEST, String(value));
+  } catch {
+    // ストレージが使えない環境では保存しない
+  }
+}
+
+function randomSeed() {
+  const bytes = new Uint8Array(6);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => (b % 36).toString(36)).join('');
+}
+
+// ---- レイアウト ----
+
+function setupCanvas(canvas, ctx, logicalW, logicalH, cssScale) {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.style.width = `${logicalW * cssScale}px`;
+  canvas.style.height = `${logicalH * cssScale}px`;
+  canvas.width = Math.round(logicalW * cssScale * dpr);
+  canvas.height = Math.round(logicalH * cssScale * dpr);
+  ctx.setTransform(cssScale * dpr, 0, 0, cssScale * dpr, 0, 0);
+}
+
+function layout() {
+  const { width: bw, height: bh } = CONFIG.board;
+  const { height: ph } = CONFIG.preview;
+  // キャンバス以外が占める高さを測る
+  const chrome = dom.app.offsetHeight - dom.preview.offsetHeight - dom.board.offsetHeight;
+  const availW = window.innerWidth - 16 - 2; // body の余白と枠線
+  const availH = window.innerHeight - 16 - chrome - 4;
+  const scale = Math.max(0.5, Math.min(availW / bw, availH / (bh + ph), 1.6));
+  state.scale = scale;
+  document.documentElement.style.setProperty('--app-width', `${bw * scale + 2}px`);
+  setupCanvas(dom.preview, previewCtx, CONFIG.preview.width, ph, scale);
+  setupCanvas(dom.board, boardCtx, bw, bh, scale);
+}
+
+// ---- 進行 ----
+
+function startGame(seed) {
+  state.seed = seed;
+  state.problemNumber = 0;
+  state.score = 0;
+  state.timeLeft = CONFIG.time.initial;
+  state.drag = null;
+  state.feedback = null;
+  state.hover = -1;
+  dom.startOverlay.classList.remove('is-visible');
+  dom.overOverlay.classList.remove('is-visible');
+  dom.seed.textContent = `シード: ${seed}`;
+  loadNextPuzzle();
+}
+
+function loadNextPuzzle() {
+  state.problemNumber += 1;
+  state.puzzle = createPuzzle(state.seed, state.problemNumber);
+  state.phase = 'playing';
+  state.feedback = null;
+  dom.rule.textContent = state.puzzle.stage.label;
+}
+
+function solve(path) {
+  const gain = state.puzzle.timeGain;
+  state.score += 1;
+  state.timeLeft = Math.min(CONFIG.time.max, state.timeLeft + gain);
+  state.feedback = { kind: 'solved', path, remaining: TRANSITION_SECONDS, duration: TRANSITION_SECONDS };
+  state.phase = 'transition';
+  state.transitionLeft = TRANSITION_SECONDS;
+  showToast(`+${gain.toFixed(1)}秒`);
+}
+
+function gameOver() {
+  state.phase = 'over';
+  state.timeLeft = 0;
+  state.drag = null;
+  if (state.score > state.best) {
+    state.best = state.score;
+    saveBest(state.best);
+  }
+  dom.resultScore.textContent = String(state.score);
+  dom.resultBest.textContent = String(state.best);
+  dom.resultSeed.textContent = state.seed;
+  dom.overOverlay.classList.add('is-visible');
+}
+
+function showToast(text) {
+  dom.toast.textContent = text;
+  dom.toast.classList.add('is-visible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => dom.toast.classList.remove('is-visible'), TOAST_MS);
+}
+
+function update(dt) {
+  if (state.phase === 'playing') {
+    state.timeLeft -= dt;
+    if (state.timeLeft <= 0) gameOver();
+  } else if (state.phase === 'transition') {
+    // 正解演出の間は時間を止める
+    state.transitionLeft -= dt;
+    if (state.transitionLeft <= 0) loadNextPuzzle();
+  }
+  if (state.feedback) {
+    state.feedback.remaining -= dt;
+    if (state.feedback.remaining <= 0 && state.feedback.kind === 'wrong') state.feedback = null;
+  }
+}
+
+// ---- 入力 ----
+
+function toLogical(e) {
+  const rect = dom.board.getBoundingClientRect();
+  return {
+    x: ((e.clientX - rect.left) / rect.width) * CONFIG.board.width,
+    y: ((e.clientY - rect.top) / rect.height) * CONFIG.board.height,
+  };
+}
+
+function extendPath(drag, from, to) {
+  const hits = starsAlongSegment(state.puzzle.stars, from, to, CONFIG.star.snapRadius);
+  for (const idx of hits) {
+    if (idx !== drag.path[drag.path.length - 1]) drag.path.push(idx);
+  }
+}
+
+function onPointerDown(e) {
+  if (state.phase !== 'playing' || state.drag) return;
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  const p = toLogical(e);
+  const idx = nearestStar(state.puzzle.stars, p, CONFIG.star.hitRadius);
+  if (idx < 0) return;
+  e.preventDefault();
+  dom.board.setPointerCapture(e.pointerId);
+  state.feedback = null;
+  state.drag = { pointerId: e.pointerId, path: [idx], cursor: p, last: p };
+}
+
+function onPointerMove(e) {
+  if (state.phase !== 'playing') {
+    state.hover = -1;
+    return;
+  }
+  const drag = state.drag;
+  if (!drag) {
+    state.hover = nearestStar(state.puzzle.stars, toLogical(e), CONFIG.star.hitRadius);
+    return;
+  }
+  if (e.pointerId !== drag.pointerId) return;
+  const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [];
+  for (const ev of events.length > 0 ? events : [e]) {
+    const p = toLogical(ev);
+    extendPath(drag, drag.last, p);
+    drag.last = p;
+    drag.cursor = p;
+  }
+}
+
+function onPointerUp(e) {
+  const drag = state.drag;
+  if (!drag || e.pointerId !== drag.pointerId) return;
+  state.drag = null;
+  if (state.phase !== 'playing') return;
+  extendPath(drag, drag.last, toLogical(e));
+  const result = judgePath(state.puzzle, drag.path);
+  if (result === 'correct') {
+    solve(drag.path);
+  } else if (result === 'wrong') {
+    // 減点なし。線が消えるだけ。
+    state.feedback = { kind: 'wrong', path: drag.path, remaining: WRONG_FLASH_SECONDS, duration: WRONG_FLASH_SECONDS };
+  }
+}
+
+function onPointerCancel(e) {
+  // 離したのではなく中断された場合は判定せずに消す
+  if (state.drag && e.pointerId === state.drag.pointerId) state.drag = null;
+}
+
+// ---- 描画 ----
+
+function drawStar(ctx, x, y, color, radius) {
+  ctx.fillStyle = color;
+  ctx.globalAlpha = 0.16;
+  ctx.beginPath();
+  ctx.arc(x, y, radius * 2.4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function strokePath(ctx, stars, path, color, width, alpha) {
+  if (path.length < 2) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(stars[path[0]].x, stars[path[0]].y);
+  for (let i = 1; i < path.length; i++) ctx.lineTo(stars[path[i]].x, stars[path[i]].y);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawRing(ctx, x, y, r, color, alpha) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function renderPreview() {
+  const ctx = previewCtx;
+  const { width, height } = CONFIG.preview;
+  ctx.fillStyle = theme.sky;
+  ctx.fillRect(0, 0, width, height);
+  if (!state.puzzle || state.phase === 'idle') return;
+
+  const { points, edges } = state.puzzle.shape;
+  const cx = width / 2;
+  const cy = height / 2;
+  ctx.save();
+  ctx.strokeStyle = theme.line;
+  ctx.globalAlpha = 0.75;
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  for (const [u, v] of edges) {
+    ctx.beginPath();
+    ctx.moveTo(cx + points[u].x, cy + points[u].y);
+    ctx.lineTo(cx + points[v].x, cy + points[v].y);
+    ctx.stroke();
+  }
+  ctx.restore();
+  for (const p of points) {
+    drawStar(ctx, cx + p.x, cy + p.y, colorHex.get(p.color), CONFIG.star.radius + 0.4);
+  }
+}
+
+function renderBoard() {
+  const ctx = boardCtx;
+  const { width, height } = CONFIG.board;
+  ctx.fillStyle = theme.sky;
+  ctx.fillRect(0, 0, width, height);
+  const puzzle = state.puzzle;
+  if (!puzzle || state.phase === 'idle') return;
+  const stars = puzzle.stars;
+
+  const fb = state.feedback;
+  if (fb) {
+    const alpha = fb.kind === 'wrong' ? Math.max(0, fb.remaining / fb.duration) : 1;
+    strokePath(ctx, stars, fb.path, fb.kind === 'wrong' ? theme.danger : theme.success, 2.5, alpha);
+  }
+
+  const drag = state.drag;
+  if (drag) {
+    strokePath(ctx, stars, drag.path, theme.line, 2.5, 0.9);
+    const last = stars[drag.path[drag.path.length - 1]];
+    ctx.save();
+    ctx.globalAlpha = 0.45;
+    ctx.strokeStyle = theme.line;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(last.x, last.y);
+    ctx.lineTo(drag.cursor.x, drag.cursor.y);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  for (const s of stars) drawStar(ctx, s.x, s.y, colorHex.get(s.color), CONFIG.star.radius);
+
+  if (drag) {
+    const last = stars[drag.path[drag.path.length - 1]];
+    drawRing(ctx, last.x, last.y, 9, theme.line, 0.8);
+  } else if (state.hover >= 0 && state.phase === 'playing') {
+    const h = stars[state.hover];
+    drawRing(ctx, h.x, h.y, 9, theme.accent, 0.6);
+  }
+
+  if (fb && fb.kind === 'solved') {
+    for (const idx of new Set(fb.path)) drawRing(ctx, stars[idx].x, stars[idx].y, 8, theme.success, 0.9);
+  }
+
+  if (state.showAnswer) {
+    strokePath(ctx, stars, puzzle.answerTrail, theme.accent, 1, 0.5);
+    for (const idx of puzzle.answerMap) drawRing(ctx, stars[idx].x, stars[idx].y, 12, theme.accent, 0.7);
+  }
+}
+
+function renderHud() {
+  const t = Math.max(0, state.timeLeft);
+  dom.time.textContent = t.toFixed(1);
+  dom.score.textContent = String(state.score);
+  dom.problem.textContent = state.problemNumber > 0 ? String(state.problemNumber) : '-';
+  dom.best.textContent = `ベスト: ${state.best}`;
+  const low = state.phase === 'playing' && t < 5;
+  dom.timeWrap.classList.toggle('is-low', low);
+  dom.timebar.classList.toggle('is-low', low);
+  dom.timebar.style.width = `${Math.min(100, (t / CONFIG.time.max) * 100)}%`;
+}
+
+let lastFrame = performance.now();
+function frame(now) {
+  // タブが非表示の間などに時間が一気に減らないよう、1 フレームの経過時間に上限を設ける
+  const dt = Math.min(0.1, Math.max(0, (now - lastFrame) / 1000));
+  lastFrame = now;
+  update(dt);
+  renderPreview();
+  renderBoard();
+  renderHud();
+  requestAnimationFrame(frame);
+}
+
+// ---- 初期化 ----
+
+function begin(seedText) {
+  const seed = seedText.trim() || randomSeed();
+  try {
+    startGame(seed);
+  } catch (err) {
+    console.error(err);
+    state.phase = 'idle';
+    dom.startOverlay.classList.add('is-visible');
+    alert('問題の生成に失敗しました。別のシードで試してください。');
+  }
+}
+
+dom.startButton.addEventListener('click', () => begin(dom.seedInput.value));
+dom.seedInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') begin(dom.seedInput.value);
+});
+dom.retrySame.addEventListener('click', () => begin(state.seed));
+dom.retryNew.addEventListener('click', () => begin(''));
+
+dom.board.addEventListener('pointerdown', onPointerDown);
+dom.board.addEventListener('pointermove', onPointerMove);
+dom.board.addEventListener('pointerup', onPointerUp);
+dom.board.addEventListener('pointercancel', onPointerCancel);
+dom.board.addEventListener('lostpointercapture', onPointerCancel);
+dom.board.addEventListener('pointerleave', () => { if (!state.drag) state.hover = -1; });
+dom.board.addEventListener('contextmenu', (e) => e.preventDefault());
+
+if (debugAllowed) {
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'd' || e.key === 'D') state.showAnswer = !state.showAnswer;
+  });
+}
+
+window.addEventListener('resize', layout);
+
+const seedParam = params.get('seed');
+if (seedParam) dom.seedInput.value = seedParam;
+
+layout();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
